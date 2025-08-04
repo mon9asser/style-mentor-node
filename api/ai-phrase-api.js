@@ -27,7 +27,7 @@ Phrase.post("/ai-phrases/insert", async (req, res) => {
     };
 
     // => Check about required fields 
-    if( ! req.body.phrase ) {
+    if( ! req.body?.phrase ) {
         response.message = "phrase field is required!";
         return res.send(response);
     }
@@ -39,7 +39,7 @@ Phrase.post("/ai-phrases/insert", async (req, res) => {
     });
     phrase = phrase.trim().toLocaleLowerCase();
 
-    var is_updator = req.body.is_update ? req.body.is_update: false; 
+    var is_updator = req.body.is_update ? req.body?.is_update: false; 
 
     var isWord = req.body.is_word == undefined ? false: req.body.is_word; 
     if( isWord === 'true') {
@@ -188,18 +188,81 @@ Phrase.post("/ai-phrases/insert-many", async (req, res) => {
  * ==============================================
  * @id if exists so reterieve only one record
  * 
- * - If @id does not exist return all with
- *      @pagination { page_no, records_count, pages_counts, all_records_count }
+ * - If @id does not exist (null) return all with
+ *      @pagination { page_number, records_per_page, pages_counts, all_records_count }
  *      - if @pagination does not exist so do default one 
  * 
  */
-Phrase.get("/ai-phrases/get", async (req, res) => {
+Phrase.post("/ai-phrases/get", async (req, res) => {
+   
+    var response = {
+        is_error: true,
+        message: '',
+        data: []
+    };
+
+    // connect to database 
+    await connectDB();
+
+    // Check if ?id exists
+    if (req.query.id) {
+        
+
+        try {
+            var finder = await AIPhrase.findOne({ _id: sanitizeHtml(req.query.id, {
+                allowedAttributes: {},
+                allowedTags: []
+            })});
+             
+            if (finder) {
+                response.is_error = false;
+                response.message = "AI phrase fetched successfully.";
+                response.data = finder;
+            } else {
+                response.message = "AI phrase does not exist.";
+                response.data = {};
+            }
+        } catch (err) {
+            response.message = err.message;
+        }
+
+        return res.send(response);
+    }
+
     
-    // check if id already exists then sanitize
-    // -  case is exists so return only one object 
-    // -  otherwise show message that the record does not exist 
 
+    var paging = req.body?.pagination;
+    if( ! paging ) {
+        response.is_error = true;
+        response.message = "The `pagination` is required!";
+        return res.send(response);
+    }
 
+    if( !paging?.page_number || !paging?.records_per_page ) {
+        response.is_error = true;
+        response.message = "The `records_per_page` and `page_number` are required inside `pagination` object!";
+        return res.send(response);
+    }
+
+    // Needed givens 
+    var all_records_count = await AIPhrase.countDocuments({});
+    var pageNumber = paging.page_number;
+    var recordsPerPage = paging.records_per_page;
+    var numberOfPages = 1;
+    if( all_records_count <= recordsPerPage ) {
+        numberOfPages = 1;
+    } else {
+        numberOfPages = Math.ceil(all_records_count / recordsPerPage);
+    }
+
+    var pagingObject = {
+        current_page: pageNumber,
+        records_per_page: recordsPerPage,
+        all_records_count: all_records_count,
+        number_of_pages: numberOfPages
+    }
+
+    return res.send({pagination: pagingObject });
     // check for pagination
     // - if it does exists so assign default 
     // - if yes so sanitize and secure it 
