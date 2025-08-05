@@ -6,9 +6,7 @@ var sanitizeHtml = require('sanitize-html');
 var {isEmail} = require("./../helper/validate");
 const bcrypt = require("bcrypt");
 var User = express.Router();
-
-
-
+ 
 User.post("/user/login", async (req, res) => {
     
     // => Layer 1
