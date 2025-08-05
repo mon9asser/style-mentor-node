@@ -1,10 +1,11 @@
 const props = require("dotenv").config().parsed;
 const express = require("express");
 const bodyParser = require("body-parser");
-
+ 
 
 // apis 
 const {Phrase} = require("./api/ai-phrase-api");
+const {User} = require("./api/users-api");
 
 var server = express();
 
@@ -37,5 +38,6 @@ server.use(function(req, res, next) {
 
 // => AI Phrases Routers (API Path)
 server.use("/api", Phrase );
+server.use("/api", User);
 
 server.listen(props.port, () => console.log(`This server listens to port ${props.port}`));
