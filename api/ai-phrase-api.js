@@ -198,7 +198,7 @@ Phrase.post("/ai-phrases/get", async (req, res) => {
     var response = {
         is_error: true,
         message: '',
-        data: []
+        data: {}
     };
 
     // connect to database 
@@ -254,23 +254,130 @@ Phrase.post("/ai-phrases/get", async (req, res) => {
     } else {
         numberOfPages = Math.ceil(all_records_count / recordsPerPage);
     }
+    
+    if(pageNumber > numberOfPages) {
+        pageNumber = numberOfPages;
+    } 
+
+    if( pageNumber <= 0 ) {
+        pageNumber = 1;
+    } 
 
     var pagingObject = {
-        current_page: pageNumber,
-        records_per_page: recordsPerPage,
-        all_records_count: all_records_count,
-        number_of_pages: numberOfPages
+        current_page: isNaN(parseInt(pageNumber))? 1: parseInt(pageNumber),
+        records_per_page: isNaN(parseInt(recordsPerPage))? 1: parseInt(recordsPerPage),
+        all_records_count: isNaN(parseInt(all_records_count))? 0: parseInt(all_records_count),
+        number_of_pages: isNaN(parseInt(numberOfPages)? 0: parseInt(numberOfPages))
     }
-
-    return res.send({pagination: pagingObject });
-    // check for pagination
-    // - if it does exists so assign default 
-    // - if yes so sanitize and secure it 
-
-    // get the records based on pagination
-
+    if( ! pagingObject.all_records_count ) {
+        pagingObject.all_records_count = 0;
+    }
+    if( ! pagingObject.number_of_pages ) {
+        pagingObject.number_of_pages = 0;
+    }
+    
+    try {
+        var documents = await AIPhrase.find({})
+        .skip((pagingObject.current_page - 1) * pagingObject.records_per_page)
+        .limit(pagingObject.records_per_page);
+    
+        // get the records based on pagination
+        response.data['paging'] = pagingObject;
+        response.data['data'] = documents;
+        response.is_error = false;
+        response.message = "All records are fetched correctly!";
+    } catch (error) {
+         response.is_error = true;
+         response.message = error.message;
+    }
+     
+   
+    return res.send(response);
 
 });
+
+
+
+/**
+ * ==============================================  
+ * Update many records by ids
+ * ==============================================
+ * @records an array has _id (required) + [is_word (optional) + phrase (optional)]
+ **/
+Phrase.post("/ai-phrases/update-many", async (req, res) => {
+    const response = {
+        message: '',
+        is_error: true, 
+        data: []
+    };
+
+    // 1. Validate records field
+    const inputRecords = req.body?.records;
+
+    if (!inputRecords) {
+        response.message = "The `records` field is required!";
+        return res.send(response);
+    }
+
+    if (!Array.isArray(inputRecords)) {
+        response.message = "The `records` must be an array!";
+        return res.send(response);
+    }
+
+    // 2. Validate & sanitize each record
+    let isValid = true;
+
+    const operations = inputRecords.map(x => {
+        if (!x._id || (!('is_word' in x) && !('phrase' in x))) {
+            isValid = false;
+            return null; // skip
+        }
+
+        // Prepare update fields
+        const updateFields = {};
+
+        if ('is_word' in x) {
+            updateFields.is_word = (x.is_word === 'true' || x.is_word === true);
+        }
+
+        if ('phrase' in x && typeof x.phrase === 'string') {
+            updateFields.phrase = sanitizeHtml(x.phrase, {
+                allowedAttributes: {},
+                allowedClasses: []
+            });
+        }
+
+        return {
+            updateOne: {
+                filter: { _id: x._id },
+                update: { $set: updateFields }
+            }
+        };
+    }).filter(op => op); // Remove nulls
+
+    if (!isValid || operations.length === 0) {
+        response.message = "Each item in the records array must include `_id` and either an `is_word` or `phrase` field to proceed.";
+        return res.send(response);
+    }
+
+    try {
+        await connectDB();
+
+        const result = await AIPhrase.bulkWrite(operations);
+
+        if (result && result.modifiedCount > 0) {
+            response.is_error = false;
+            response.message = `Updated ${result.modifiedCount} of ${result.matchedCount} matched records.`;
+        } else {
+            response.message = 'No records were updated.';
+        }
+    } catch (error) {
+        response.message = error.message;
+    }
+
+    return res.send(response);
+});
+
 
 
 /**
@@ -278,11 +385,76 @@ Phrase.post("/ai-phrases/get", async (req, res) => {
  * Delete data from ai phrases by id or all
  * ==============================================
  * @id optional - if it does not exist so delete all data
+ * @delete_all integer
  **/
 
 Phrase.post("/ai-phrases/delete", async (req, res) => {
-    // if the @id exists delete the record then return
+    
+    var response = {
+        message: "",
+        is_error: true,
+        data: []
+    };
+
+     
+    if( ! req.body?.id && ! req.body?.delete_all ) {
+        response.message = "The `id` or `delete_all` field is required!";
+        return res.send(response);
+    } 
+
+    // delete item by id
+    if( req.body?.id) {
+
+        var _id = sanitizeHtml(req.body.id, {
+            allowedAttributes: {},
+            allowedTags: []
+        });
+        
+        // open database 
+        await connectDB();
+
+        var getItem = await AIPhrase.findOne({_id});
+        if( getItem ) {
+            var result = await AIPhrase.deleteOne({_id});
+            if (result.deletedCount > 0) { 
+                response.is_error = false;
+                response.message = 'Deleted successful';
+            } else {
+                response.is_error = true;
+                response.message = 'Failed to delete the record!';
+            }
+        } else {
+            // failed to delete the item
+            response.is_error = true;
+            response.message = 'No record found to delete!';
+        }
+
+        return res.send(response);
+    }
+    
+    response.is_error = true;
+    response.message = 'If you need to delete all records use 1 in `delete_all` field';
+    
     // otherwise delete all records  
+    if( req.body?.delete_all && parseInt(req.body?.delete_all) == 1 ) {
+        
+        // open database 
+        await connectDB();
+
+        // result 
+        var result = await AIPhrase.deleteMany({});
+        if (result.deletedCount > 0) {
+            response.is_error = false;
+            response.message = `Deleted ${result.deletedCount} records`;
+        } else {
+            response.message = 'No records to delete';
+        }
+    }  
+
+
+    return res.send(response);
 });
+
+
 
 module.exports = { Phrase };

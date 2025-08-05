@@ -12,6 +12,29 @@ var server = express();
 server.use(bodyParser.json());
 server.use(bodyParser.urlencoded({extended: true }));
 
+// secure layer middleware
+server.use(function(req, res, next) {
+    const api_key = req.headers['api-key'];
+    if(!api_key) {
+        return res.status(403).send({
+            is_error: true,
+            message: "You have no permission!",
+            data: []
+        });
+    }
+
+    if (api_key === props.api_keys) {
+        return next();
+    }
+
+    return res.status(403).send({
+        is_error: true,
+        message: "You have no permission!",
+        data: []
+    });
+});
+
+
 // => AI Phrases Routers (API Path)
 server.use("/api", Phrase );
 
